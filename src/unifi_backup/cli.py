@@ -191,8 +191,6 @@ def main():
             config["output"]["directory"], dt.now().strftime(config["output"]["name"])
         )
 
-    logging.captureWarnings(True)
-
     fetch_backup(config["controller"], out_file)
 
     if rotate:
