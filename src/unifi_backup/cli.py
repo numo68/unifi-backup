@@ -160,8 +160,10 @@ def rotate_files(output_config: dict):
     while len(files) > output_config["keep"]:
         remove(path.join(output_config["directory"], files.pop(0)))
 
+
 def labels(ctrl_config):
     return f'{{url="https://{ ctrl_config["host"] }:{ ctrl_config["port"] }" site="{ ctrl_config["site"] }"}}'  # pylint: disable=line-too-long
+
 
 def main():
     """Main
