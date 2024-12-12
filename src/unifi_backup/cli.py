@@ -15,7 +15,7 @@ import urllib3
 from pyunifi.controller import APIError
 from pyunifi.controller import Controller
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "unifi-backup", "config.yml"
@@ -162,7 +162,7 @@ def rotate_files(output_config: dict):
 
 
 def labels(ctrl_config):
-    return f'{{url="https://{ ctrl_config["host"] }:{ ctrl_config["port"] }" site="{ ctrl_config["site"] }"}}'  # pylint: disable=line-too-long
+    return f'{{url="https://{ ctrl_config["host"] }:{ ctrl_config["port"] }",site="{ ctrl_config["site"] }"}}'  # pylint: disable=line-too-long
 
 
 def main():
