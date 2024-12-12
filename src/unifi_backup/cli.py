@@ -4,15 +4,18 @@ from the UniFi network application
 
 import shutil
 import argparse
-import logging
 import re
-from os import environ, path, scandir, remove
+import warnings
+from os import environ, path, scandir, remove, rename, stat
 from datetime import datetime as dt
 from yaml import safe_load
 from schema import Schema, SchemaError, And, Or, Optional, Use
 
+import urllib3
 from pyunifi.controller import APIError
 from pyunifi.controller import Controller
+
+__version__ = "0.2.0"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "unifi-backup", "config.yml"
@@ -43,6 +46,12 @@ SCHEMA = Schema(
                 Optional("keep"): And(Use(int), lambda x: x > 0),
             },
         ),
+        Optional("metrics"): Schema(
+            {
+                "directory": And(str, lambda s: len(s) > 0),
+                Optional("suffix"): And(str, lambda s: len(s) > 0),
+            },
+        ),
     }
 )
 
@@ -58,7 +67,7 @@ def parse_arguments():
 
     parser = argparse.ArgumentParser(
         prog="unifi-backup",
-        description="A tool to fetch backups from the UniFi network application",
+        description=f"A tool to fetch backups from the UniFi network application (v{ __version__ })",
     )
 
     parser.add_argument(
@@ -151,9 +160,11 @@ def rotate_files(output_config: dict):
     while len(files) > output_config["keep"]:
         remove(path.join(output_config["directory"], files.pop(0)))
 
+def labels(ctrl_config):
+    return f'{{url="https://{ ctrl_config["host"] }:{ ctrl_config["port"] }" site="{ ctrl_config["site"] }"}}'  # pylint: disable=line-too-long
 
 def main():
-    """_summary_
+    """Main
 
     Raises
     ------
@@ -172,6 +183,11 @@ def main():
         ) from None
 
     arguments["config"].close()
+
+    if config["controller"]["ssl_verify"] is False:
+        urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+
+    now = dt.now()
 
     # If the file was given through an argument, use that and skip the rotation
     # If not, use the configuration to construct the file name and do the rotation
@@ -195,3 +211,33 @@ def main():
 
     if rotate:
         rotate_files(config["output"])
+
+    if "metrics" in config:
+        if not path.isdir(config["metrics"]["directory"]):
+            raise ValueError(
+                f"Metrics directory {config['metrics']['directory']} does not exist or is not a directory"  # pylint: disable=line-too-long
+            )
+
+        metrics_file = path.join(config["metrics"]["directory"], "unifi-backup")
+        if "suffix" in config["metrics"]:
+            metrics_file += "-" + config["metrics"]["suffix"]
+
+        metrics_file += ".prom"
+
+        with open(metrics_file + ".new", "w", encoding="utf-8") as f:
+            f.writelines(
+                [
+                    "# HELP unifi_backup_timestamp_seconds Time the backup was started.\n",
+                    "# TYPE unifi_backup_timestamp_seconds counter\n\n"
+                    "# HELP unifi_backup_size_bytes Size of the backup.\n",
+                    "# TYPE inifi_backup_size_bytes gauge\n\n",
+                ]
+            )
+            f.write(
+                f'unifi_backup_timestamp_seconds{labels(config["controller"])} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
+            )
+            f.write(
+                f'unifi_backup_size_bytes{labels(config["controller"])} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
+            )
+
+        rename(metrics_file + ".new", metrics_file)
