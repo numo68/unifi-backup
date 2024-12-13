@@ -6,16 +6,16 @@ import shutil
 import argparse
 import re
 import warnings
-from os import environ, path, scandir, remove, rename, stat
+from os import environ, path, scandir, remove, stat
 from datetime import datetime as dt
 from yaml import safe_load
 from schema import Schema, SchemaError, And, Or, Optional, Use
 
 import urllib3
-from pyunifi.controller import APIError
-from pyunifi.controller import Controller
+from pyunifi.controller import APIError, Controller
+from prometheus_client import Gauge, CollectorRegistry, write_to_textfile
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 DEFAULT_CONFIGURATION_FILE = path.join(
     environ["HOME"], ".config", "unifi-backup", "config.yml"
@@ -161,10 +161,6 @@ def rotate_files(output_config: dict):
         remove(path.join(output_config["directory"], files.pop(0)))
 
 
-def labels(ctrl_config):
-    return f'{{url="https://{ ctrl_config["host"] }:{ ctrl_config["port"] }",site="{ ctrl_config["site"] }"}}'  # pylint: disable=line-too-long
-
-
 def main():
     """Main
 
@@ -215,6 +211,20 @@ def main():
         rotate_files(config["output"])
 
     if "metrics" in config:
+        registry = CollectorRegistry()
+        backup_time = Gauge(
+            "unifi_backup_timestamp_seconds",
+            "Time the backup was started.",
+            ["host", "site"],
+            registry=registry,
+        )
+        backup_size = Gauge(
+            "unifi_backup_size_bytes",
+            "Size of the backup.",
+            ["host", "site"],
+            registry=registry,
+        )
+
         if not path.isdir(config["metrics"]["directory"]):
             raise ValueError(
                 f"Metrics directory {config['metrics']['directory']} does not exist or is not a directory"  # pylint: disable=line-too-long
@@ -226,20 +236,11 @@ def main():
 
         metrics_file += ".prom"
 
-        with open(metrics_file + ".new", "w", encoding="utf-8") as f:
-            f.writelines(
-                [
-                    "# HELP unifi_backup_timestamp_seconds Time the backup was started.\n",
-                    "# TYPE unifi_backup_timestamp_seconds counter\n\n"
-                    "# HELP unifi_backup_size_bytes Size of the backup.\n",
-                    "# TYPE inifi_backup_size_bytes gauge\n\n",
-                ]
-            )
-            f.write(
-                f'unifi_backup_timestamp_seconds{labels(config["controller"])} {int(now.timestamp())}\n'  # pylint: disable=line-too-long
-            )
-            f.write(
-                f'unifi_backup_size_bytes{labels(config["controller"])} {stat(out_file).st_size}\n'  # pylint: disable=line-too-long
-            )
+        backup_time.labels(
+            config["controller"]["host"], config["controller"]["site"]
+        ).set_to_current_time()
+        backup_size.labels(
+            config["controller"]["host"], config["controller"]["site"]
+        ).set(stat(out_file).st_size)
 
-        rename(metrics_file + ".new", metrics_file)
+        write_to_textfile(metrics_file, registry)
